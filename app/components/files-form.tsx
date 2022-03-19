@@ -17,6 +17,7 @@ export function FilesForm({ isPending }: FilesFormProps) {
         </label>
         <input
           type="file"
+          accept="image/jpg,image/jpeg"
           name="cover"
           id="cover"
           placeholder="Cover"

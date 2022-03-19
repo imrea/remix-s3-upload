@@ -50,6 +50,11 @@ export async function uploadStreamToFile(file: Readable) {
       reject(reason);
     }
 
+    meter.on('limit', () => {
+      console.log('meter [ERROR]: File size limit exceeded');
+      abort('LIMIT_REACHED');
+    });
+
     meta.on('error', (err) => {
       console.log('meta [ERROR]: ', err);
       abort('INVALID_FILE');
@@ -59,8 +64,6 @@ export async function uploadStreamToFile(file: Readable) {
       console.log('transform [ERROR]: ', err);
       abort('IMAGE_TRANSFORM_ERROR');
     });
-
-    meter.on('limit', () => abort('LIMIT_REACHED'));
 
     transform.on('finish', () =>
       resolve({

@@ -43,15 +43,28 @@ function getS3KeyUrl(key: string) {
   return `https://${process.env.MF_SPACES_BUCKET}.${process.env.MF_SPACES_ENDPOINT}/${key}`;
 }
 
-type StreamUploadResult = {
+type ImageStreamUploadResult = {
   uploadId: string;
   files: Array<{ size: number; key: string; url: string }>;
 };
 
-export async function uploadStreamToS3(file: Readable) {
-  return new Promise<StreamUploadResult>((resolve, reject) => {
+type ImageUploadOptions = {
+  maxFileSize?: number;
+  sizes?: number[];
+  format?: 'jpeg' | 'jpg' | 'webp' | 'png';
+};
+
+export async function uploadImageStreamToS3(
+  file: Readable,
+  {
+    maxFileSize = 5_000_000,
+    sizes = [600, 1200, 2400],
+    format = 'webp',
+  }: ImageUploadOptions = {}
+) {
+  return new Promise<ImageStreamUploadResult>((resolve, reject) => {
     let id = cuid();
-    let meter = new UploadMeter(5_000_000);
+    let meter = new UploadMeter(maxFileSize);
     let meta = sharp().metadata((_err, meta) => {
       meta &&
         console.log(`meta [${id}] format: ${meta.format} | size: ${meta.size}`);
@@ -60,22 +73,15 @@ export async function uploadStreamToS3(file: Readable) {
     // Initialize root transform writestream
     let transform = sharp();
 
-    // Initialize 600px transform substream
-    let resize600 = transform.clone().resize(600).webp();
-    let upload600Key = getS3Key(`${id}-600.webp`);
-    let upload600Url = getS3KeyUrl(upload600Key);
-    let upload600 = s3Upload({
-      key: upload600Key,
-      mime: 'image/webp',
-    });
-
-    // Initialize 1200px transform substream
-    let resize1200 = transform.clone().resize(1200).webp();
-    let upload1200Key = getS3Key(`${id}-1200.webp`);
-    let upload1200Url = getS3KeyUrl(upload1200Key);
-    let upload1200 = s3Upload({
-      key: upload1200Key,
-      mime: 'image/webp',
+    let transforms = sizes.map((size) => {
+      let key = getS3Key(`${id}-${size}.${format}`);
+      let url = getS3KeyUrl(key);
+      let resizeStream = transform.clone().resize(size).toFormat(format);
+      let { stream: uploadStream, upload } = s3Upload({
+        key,
+        mime: `image/${format}`,
+      });
+      return { key, url, size, resizeStream, uploadStream, upload };
     });
 
     // Handle abort flow globally
@@ -84,10 +90,10 @@ export async function uploadStreamToS3(file: Readable) {
       meter.unpipe();
       meta.unpipe();
 
-      resize600.unpipe();
-      upload600.upload.abort();
-      resize1200.unpipe();
-      upload1200.upload.abort();
+      transforms.forEach((t) => {
+        t.resizeStream.unpipe();
+        t.upload.abort();
+      });
 
       transform.unpipe();
       transform.removeAllListeners();
@@ -116,21 +122,17 @@ export async function uploadStreamToS3(file: Readable) {
     });
 
     // Register transform substream uploads
-    resize600.pipe(upload600.stream);
-    resize1200.pipe(upload1200.stream);
+    transforms.forEach((t) => t.resizeStream.pipe(t.uploadStream));
 
     // Kick off stream handling by piping it into the root transform sstream
     file.pipe(meter).pipe(meta).pipe(transform);
 
     // Wait for all streams being uploaded to S3
-    Promise.all([upload600.upload.done(), upload1200.upload.done()])
+    Promise.all(transforms.map((t) => t.upload.done()))
       .then(() =>
         resolve({
           uploadId: id,
-          files: [
-            { size: 600, key: upload600Key, url: upload600Url },
-            { size: 1200, key: upload1200Key, url: upload1200Url },
-          ],
+          files: transforms.map(({ key, url, size }) => ({ key, url, size })),
         })
       )
       .catch((err) => {

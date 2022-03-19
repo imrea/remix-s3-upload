@@ -7,7 +7,7 @@ import {
   useTransition,
 } from 'remix';
 import { FilesForm } from '~/components/files-form';
-import { uploadStreamToS3 } from '~/services/s3-upload.server';
+import { uploadImageStreamToS3 } from '~/services/s3-upload.server';
 
 let s3UploadHandler: UploadHandler = async ({ name, stream }) => {
   if (name !== 'cover') {
@@ -26,12 +26,13 @@ let s3UploadHandler: UploadHandler = async ({ name, stream }) => {
   console.log(`Field [${name}] starting upload...`);
 
   try {
-    let upload = await uploadStreamToS3(stream);
+    let upload = await uploadImageStreamToS3(stream, {
+      maxFileSize: 5_000_000,
+    });
     console.log(`Field [${name}] finished upload`);
     return JSON.stringify(upload);
   } catch (error) {
-    console.log(`Field [${name}] failed upload`);
-    console.log(error);
+    console.log(`Field [${name}] failed upload: ${error}`);
     return JSON.stringify({ error });
   }
 };
@@ -47,9 +48,14 @@ export const action: ActionFunction = async ({ request }) => {
   //   return json({ error }, { status: 400 });
   // }
 
-  return json({
-    fields: { cover: JSON.parse(formData.get('cover') as string) },
-  });
+  let cover = JSON.parse(formData.get('cover') as string);
+
+  return json(
+    {
+      fields: { cover },
+    },
+    { status: cover.error ? 400 : 200 }
+  );
 };
 
 export default function S3Upload() {
