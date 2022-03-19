@@ -6,6 +6,7 @@ declare namespace NodeJS {
     MF_SPACES_API_KEY: string;
     MF_SPACES_API_SECRET: string;
     MF_SPACES_ENDPOINT: string;
+    MF_SPACES_REGION: string;
     MF_SPACES_BUCKET: string;
     MF_SPACES_KEY_PREFIX: string;
   }
